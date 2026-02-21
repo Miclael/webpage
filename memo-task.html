@@ -200,7 +200,8 @@
 
         function updateUI() {
             const list = document.getElementById('task-list');
-            const todayStr = new Date().toLocaleDateString('en-CA'); // 確保產出 YYYY-MM-DD
+            const now = new Date();
+            const todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
             
             // 避免讀取時發生未定義錯誤，確保 tasks 是陣列
             if (!Array.isArray(tasks)) tasks = [];
@@ -249,7 +250,8 @@
         }
 
         function startEdit(id) {
-            const t = tasks.find(x => x.id === id);
+            const t = tasks.find(x => x.id == id);
+            if (!t) return;
             editingId = id;
             document.getElementById('modal-title').innerText = '修改任務';
             document.getElementById('t-title').value = t.title;
@@ -264,7 +266,8 @@
         }
 
         function startReschedule(id) {
-            const t = tasks.find(x => x.id === id);
+            const t = tasks.find(x => x.id == id);
+            if (!t) return;
             editingId = id;
             document.getElementById('modal-title').innerText = '設定下次日期';
             document.getElementById('t-title').value = t.title;
@@ -284,10 +287,10 @@
             if (!title || !date) return alert('請填寫完整');
             
             const data = { title, date, freqMode, freqVal: parseInt(document.getElementById('t-freq-val').value), freqUnit: document.getElementById('t-freq-unit').value, selectedDays, selectedDates, completed: false };
-            const taskData = editingId ? { ...tasks.find(x => x.id === editingId), ...data } : { ...data, id: Date.now().toString() };
+            const taskData = editingId ? { ...tasks.find(x => x.id == editingId), ...data } : { ...data, id: Date.now().toString() };
             
             // 樂觀更新：先更新本地陣列並重新渲染畫面
-            if (editingId) tasks = tasks.map(x => x.id === editingId ? taskData : x);
+            if (editingId) tasks = tasks.map(x => x.id == editingId ? taskData : x);
             else tasks.push(taskData);
             closeModal(); 
             updateUI();
@@ -310,7 +313,7 @@
         async function toggleTask(id) {
             let targetTask = null;
             tasks = tasks.map(t => {
-                if (t.id === id) {
+                if (t.id == id) {
                     let updatedTask = { ...t };
                     if (t.freqMode !== 'none' && !t.completed) {
                         let d = new Date(t.date);
@@ -327,7 +330,7 @@
                             d.setDate(d.getDate() + 1);
                             while (!t.selectedDates.includes(d.getDate())) d.setDate(d.getDate() + 1);
                         }
-                        const newDate = d.toLocaleDateString('en-CA');
+                        const newDate = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
                         updatedTask.date = newDate;
                         showToast(`已續期至 ${newDate}`);
                     } else {
@@ -358,7 +361,7 @@
         // 刪除任務並同步到試算表
         async function deleteTask(id) { 
             if (confirm('確定刪除？')) { 
-                tasks = tasks.filter(t => t.id !== id); 
+                tasks = tasks.filter(t => t.id != id); 
                 updateUI(); 
                 
                 showToast('🔄 刪除中...', true);
