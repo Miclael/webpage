@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>記事提醒 - 雲端同步版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-tap-highlight-color: transparent; user-select: none; }
+        .glass { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+        @media (prefers-color-scheme: dark) {
+            body { background-color: #000; color: #fff; }
+            .glass { background: rgba(28, 28, 30, 0.85); border-color: #2c2c2e; }
+        }
+        .overdue-glow { animation: pulse-red 1.5s infinite; border-color: rgba(185, 28, 28, 0.8) !important; }
+        @keyframes pulse-red { 0% { box-shadow: 0 0 0 0 rgba(185, 28, 28, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(185, 28, 28, 0); } 100% { box-shadow: 0 0 0 0 rgba(185, 28, 28, 0); } }
+        #toast { transition: all 0.3s ease; transform: translateY(-100px); opacity: 0; }
+        #toast.show { transform: translateY(20px); opacity: 1; }
+        .icon-size { width: 18px; height: 18px; }
+        
+        .day-btn, .date-btn { display: flex; align-items: center; justify-content: center; font-weight: bold; transition: all 0.1s; }
+        .day-btn { width: 32px; height: 32px; border-radius: 8px; font-size: 12px; }
+        .date-btn { height: 32px; border-radius: 6px; font-size: 11px; }
+        .active { background-color: #007aff; color: white; }
+        .inactive { background-color: #f2f2f7; color: #8e8e93; }
+        @media (prefers-color-scheme: dark) { .inactive { background-color: #1c1c1e; } }
+    </style>
+</head>
+<body class="bg-[#f2f2f7] dark:bg-black min-h-screen pb-32">
+
+    <svg style="display: none;">
+        <symbol id="icon-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></symbol>
+        <symbol id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></symbol>
+        <symbol id="icon-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></symbol>
+        <symbol id="icon-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></symbol>
+        <symbol id="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></symbol>
+        <symbol id="icon-calendar-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7.5"></path><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line><line x1="19" y1="16" x2="19" y2="22"></line><line x1="16" y1="19" x2="22" y2="19"></line></symbol>
+    </svg>
+
+    <div id="toast" class="fixed top-0 left-0 right-0 flex justify-center z-[100] pointer-events-none">
+        <div class="bg-blue-600 text-white px-5 py-2 rounded-full shadow-lg font-bold text-xs text-center min-w-[150px]">已更新</div>
+    </div>
+
+    <header class="glass sticky top-0 z-40 px-6 pt-10 pb-4 border-b border-gray-200 dark:border-gray-800">
+        <div class="max-w-lg mx-auto">
+            <div class="flex justify-between items-center mb-3">
+                <h1 class="text-2xl font-black tracking-tight">記事提醒</h1>
+            </div>
+            <p id="current-date" class="text-gray-500 dark:text-gray-400 text-xs font-bold mb-3"></p>
+            <div class="w-full h-1 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden">
+                <div id="progress-bar" class="h-full bg-blue-500 transition-all duration-500" style="width: 0%"></div>
+            </div>
+        </div>
+    </header>
+
+    <main id="task-list" class="max-w-lg mx-auto px-4 pt-5 space-y-3"></main>
+
+    <div class="fixed bottom-8 left-0 right-0 px-6 flex justify-center z-30 pointer-events-none">
+        <button onclick="openModal()" class="pointer-events-auto w-full max-w-md h-14 bg-blue-600 text-white rounded-2xl shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all">
+            <svg class="icon-size" style="width:24px;height:24px"><use href="#icon-plus"/></svg>
+            <span class="text-lg font-bold">新增重要提醒</span>
+        </button>
+    </div>
+
+    <div id="modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end justify-center z-50">
+        <div class="bg-white dark:bg-[#1c1c1e] w-full max-w-lg rounded-t-[2rem] p-6 pb-12 shadow-2xl overflow-y-auto max-h-[90vh]">
+            <div class="flex justify-between items-center mb-6">
+                <h2 id="modal-title" class="text-xl font-black">新任務</h2>
+                <button onclick="closeModal()" class="text-gray-400 font-bold text-sm px-2">取消</button>
+            </div>
+            <div class="space-y-5">
+                <div>
+                    <label class="text-[10px] font-bold text-gray-400 block mb-1.5 uppercase tracking-wider">任務標題</label>
+                    <input type="text" id="t-title" class="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-none font-bold text-sm focus:ring-2 focus:ring-blue-500" placeholder="例如：繳交電費...">
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold text-gray-400 block mb-1.5 uppercase tracking-wider">執行日期</label>
+                    <input type="date" id="t-date" class="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-none font-bold text-sm">
+                </div>
+                
+                <div class="space-y-3">
+                    <label class="text-[10px] font-bold text-gray-400 block mb-1.5 uppercase tracking-wider">重複頻率</label>
+                    <select id="t-freq-mode" onchange="toggleFreqInputs()" class="w-full p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border-none font-bold text-sm">
+                        <option value="none">一次性任務</option>
+                        <option value="recurring">間隔循環 (每...)</option>
+                        <option value="weekly_days">每週固定</option>
+                        <option value="monthly_dates">每月固定</option>
+                    </select>
+                    
+                    <div id="ui-recurring" class="hidden flex gap-3 items-center mt-2">
+                        <span class="text-sm font-bold text-gray-400">每</span>
+                        <input type="number" id="t-freq-val" value="1" min="1" class="w-16 p-3 rounded-xl bg-gray-100 dark:bg-gray-700 border-none font-bold text-center text-sm">
+                        <select id="t-freq-unit" class="flex-1 p-3 rounded-xl bg-gray-100 dark:bg-gray-700 border-none font-bold text-sm">
+                            <option value="days">天</option>
+                            <option value="weeks">週</option>
+                            <option value="months">個月</option>
+                            <option value="years">年</option>
+                        </select>
+                    </div>
+
+                    <div id="ui-weekly" class="hidden flex justify-between mt-2">
+                        <button onclick="toggleDay(0)" class="day-btn inactive" data-day="0">日</button>
+                        <button onclick="toggleDay(1)" class="day-btn inactive" data-day="1">一</button>
+                        <button onclick="toggleDay(2)" class="day-btn inactive" data-day="2">二</button>
+                        <button onclick="toggleDay(3)" class="day-btn inactive" data-day="3">三</button>
+                        <button onclick="toggleDay(4)" class="day-btn inactive" data-day="4">四</button>
+                        <button onclick="toggleDay(5)" class="day-btn inactive" data-day="5">五</button>
+                        <button onclick="toggleDay(6)" class="day-btn inactive" data-day="6">六</button>
+                    </div>
+
+                    <div id="ui-monthly" class="hidden mt-2">
+                        <div class="grid grid-cols-7 gap-2" id="date-picker-grid"></div>
+                    </div>
+                </div>
+
+                <button onclick="saveTask()" class="w-full bg-blue-600 text-white py-4 rounded-xl font-black text-lg active:scale-95 shadow-lg">確認儲存</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ======= 請在這裡替換成你的 Google Apps Script 網頁應用程式網址 =======
+        const API_URL = "https://script.google.com/macros/s/AKfycbyHZINBz_yjT1Q3tZujwPc0TxAJpe1eKU5i47upXMHxaLXmc0P9l8ZT7Z6OifCq_30x/exec"; 
+        // ====================================================================
+
+        let tasks = [];
+        let editingId = null;
+        let selectedDays = [];
+        let selectedDates = [];
+
+        // 初始化日期選擇網格
+        const grid = document.getElementById('date-picker-grid');
+        for (let i = 1; i <= 31; i++) {
+            const b = document.createElement('button');
+            b.className = 'date-btn inactive';
+            b.innerText = i;
+            b.onclick = () => {
+                if (selectedDates.includes(i)) selectedDates = selectedDates.filter(x => x !== i);
+                else selectedDates.push(i);
+                renderPickers();
+            };
+            b.dataset.date = i;
+            grid.appendChild(b);
+        }
+
+        // 顯示提示訊息與 Loading 狀態
+        function showToast(msg, isLoading = false) {
+            const t = document.getElementById('toast');
+            const tDiv = t.querySelector('div');
+            tDiv.innerText = msg;
+            tDiv.className = isLoading ? 'bg-gray-600 text-white px-5 py-2 rounded-full shadow-lg font-bold text-xs text-center min-w-[150px]' : 'bg-blue-600 text-white px-5 py-2 rounded-full shadow-lg font-bold text-xs text-center min-w-[150px]';
+            t.classList.add('show');
+            if (!isLoading) {
+                setTimeout(() => t.classList.remove('show'), 2000);
+            }
+        }
+
+        // 從 Google 試算表載入資料
+        async function loadTasks() {
+            showToast('🔄 正在同步資料...', true);
+            try {
+                const response = await fetch(API_URL);
+                tasks = await response.json();
+                updateUI();
+                document.getElementById('toast').classList.remove('show'); // 隱藏 loading
+            } catch (error) {
+                console.error(error);
+                showToast('❌ 讀取失敗，請檢查網路');
+            }
+        }
+
+        function toggleDay(d) {
+            if (selectedDays.includes(d)) selectedDays = selectedDays.filter(x => x !== d);
+            else selectedDays.push(d);
+            renderPickers();
+        }
+
+        function renderPickers() {
+            document.querySelectorAll('.day-btn').forEach(btn => btn.className = 'day-btn ' + (selectedDays.includes(parseInt(btn.dataset.day)) ? 'active' : 'inactive'));
+            document.querySelectorAll('.date-btn').forEach(btn => btn.className = 'date-btn ' + (selectedDates.includes(parseInt(btn.dataset.date)) ? 'active' : 'inactive'));
+        }
+
+        function toggleFreqInputs() {
+            const m = document.getElementById('t-freq-mode').value;
+            document.getElementById('ui-recurring').classList.toggle('hidden', m !== 'recurring');
+            document.getElementById('ui-weekly').classList.toggle('hidden', m !== 'weekly_days');
+            document.getElementById('ui-monthly').classList.toggle('hidden', m !== 'monthly_dates');
+        }
+
+        function getFreqLabel(t) {
+            if (t.freqMode === 'none') return '';
+            if (t.freqMode === 'recurring') return ` · 每 ${t.freqVal} ${ {days:'天',weeks:'週',months:'個',years:'年'}[t.freqUnit] }`;
+            if (t.freqMode === 'weekly_days') return ` · 每週 ${t.selectedDays.sort().map(d => ['日','一','二','三','四','五','六'][d]).join('')}`;
+            if (t.freqMode === 'monthly_dates') return ` · 每月 ${t.selectedDates.sort((a,b)=>a-b).join(',')}號`;
+            return '';
+        }
+
+        function updateUI() {
+            const list = document.getElementById('task-list');
+            const now = new Date();
+            const todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+            
+            // 避免讀取時發生未定義錯誤，確保 tasks 是陣列
+            if (!Array.isArray(tasks)) tasks = [];
+            
+            tasks.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+
+            if (tasks.length === 0) list.innerHTML = '<div class="text-center py-20 text-gray-400 font-bold text-sm">目前沒有任務</div>';
+            else {
+                list.innerHTML = tasks.map(t => {
+                    const isOverdue = t.date < todayStr && !t.completed;
+                    const isToday = t.date === todayStr && !t.completed;
+                    return `
+                        <div class="relative bg-white dark:bg-[#1c1c1e] p-4 rounded-[1.25rem] shadow-sm flex items-center gap-4 border-2 ${isOverdue ? 'overdue-glow border-red-500/20' : 'border-transparent dark:border-gray-800'} ${t.completed ? 'opacity-50 grayscale' : ''}">
+                            <button onclick="toggleTask('${t.id}')" class="shrink-0 w-8 h-8 rounded-lg border-2 flex items-center justify-center ${t.completed ? 'bg-green-500 border-green-500 text-white' : isOverdue ? 'border-red-500' : isToday ? 'border-blue-500' : 'border-gray-200 dark:border-gray-700'}">
+                                ${t.completed ? '<svg class="w-5 h-5"><use href="#icon-check"/></svg>' : ''}
+                            </button>
+                            <div class="flex-1 min-w-0" onclick="${t.completed ? `startReschedule('${t.id}')` : `startEdit('${t.id}')`}">
+                                <h3 class="font-bold text-base truncate ${t.completed ? 'line-through text-gray-400' : ''}">${t.title}</h3>
+                                <p class="text-[10px] font-bold text-gray-400 mt-1 uppercase tracking-wider">${t.date}${getFreqLabel(t)}</p>
+                            </div>
+                            <div class="flex gap-1 shrink-0">
+                                ${t.completed ? `
+                                    <button onclick="startReschedule('${t.id}')" class="text-blue-500 p-2"><svg class="icon-size"><use href="#icon-calendar-plus"/></svg></button>
+                                ` : `
+                                    <button onclick="startEdit('${t.id}')" class="text-gray-300 dark:text-gray-700 p-2"><svg class="icon-size"><use href="#icon-edit"/></svg></button>
+                                `}
+                                <button onclick="deleteTask('${t.id}')" class="text-gray-300 dark:text-gray-700 p-2"><svg class="icon-size"><use href="#icon-trash"/></svg></button>
+                            </div>
+                        </div>`;
+                }).join('');
+            }
+            const todayTasks = tasks.filter(t => t.date === todayStr);
+            const pct = todayTasks.length > 0 ? (todayTasks.filter(t => t.completed).length / todayTasks.length) * 100 : 0;
+            document.getElementById('progress-bar').style.width = pct + '%';
+            document.getElementById('current-date').innerText = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
+        }
+
+        function openModal() {
+            editingId = null; selectedDays = []; selectedDates = [];
+            document.getElementById('modal-title').innerText = '新任務';
+            document.getElementById('t-title').value = '';
+            document.getElementById('t-date').valueAsDate = new Date();
+            document.getElementById('t-freq-mode').value = 'none';
+            toggleFreqInputs(); renderPickers();
+            document.getElementById('modal').classList.remove('hidden');
+        }
+
+        function startEdit(id) {
+            const t = tasks.find(x => x.id == id);
+            if (!t) return;
+            editingId = id;
+            document.getElementById('modal-title').innerText = '修改任務';
+            document.getElementById('t-title').value = t.title;
+            document.getElementById('t-date').value = t.date;
+            document.getElementById('t-freq-mode').value = t.freqMode;
+            document.getElementById('t-freq-val').value = t.freqVal || 1;
+            document.getElementById('t-freq-unit').value = t.freqUnit || 'days';
+            selectedDays = t.selectedDays || [];
+            selectedDates = t.selectedDates || [];
+            toggleFreqInputs(); renderPickers();
+            document.getElementById('modal').classList.remove('hidden');
+        }
+
+        function startReschedule(id) {
+            const t = tasks.find(x => x.id == id);
+            if (!t) return;
+            editingId = id;
+            document.getElementById('modal-title').innerText = '設定下次日期';
+            document.getElementById('t-title').value = t.title;
+            document.getElementById('t-date').valueAsDate = new Date(); 
+            document.getElementById('t-freq-mode').value = 'none'; 
+            toggleFreqInputs(); renderPickers();
+            document.getElementById('modal').classList.remove('hidden');
+        }
+
+        function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+
+        // 儲存任務並同步到試算表
+        async function saveTask() {
+            const title = document.getElementById('t-title').value.trim();
+            const date = document.getElementById('t-date').value;
+            const freqMode = document.getElementById('t-freq-mode').value;
+            if (!title || !date) return alert('請填寫完整');
+            
+            const data = { title, date, freqMode, freqVal: parseInt(document.getElementById('t-freq-val').value), freqUnit: document.getElementById('t-freq-unit').value, selectedDays, selectedDates, completed: false };
+            const taskData = editingId ? { ...tasks.find(x => x.id == editingId), ...data } : { ...data, id: Date.now().toString() };
+            
+            // 樂觀更新：先更新本地陣列並重新渲染畫面
+            if (editingId) tasks = tasks.map(x => x.id == editingId ? taskData : x);
+            else tasks.push(taskData);
+            closeModal(); 
+            updateUI();
+
+            // 背景同步至 Google Sheets
+            showToast('🔄 儲存中...', true);
+            try {
+                await fetch(API_URL, { 
+                    method: 'POST', 
+                    body: JSON.stringify({ action: 'save', data: taskData }),
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' } // 避免跨域預檢請求問題
+                });
+                showToast('✅ 儲存成功');
+            } catch (e) {
+                showToast('❌ 儲存失敗');
+            }
+        }
+
+        // 切換狀態並同步到試算表
+        async function toggleTask(id) {
+            let targetTask = null;
+            tasks = tasks.map(t => {
+                if (t.id == id) {
+                    let updatedTask = { ...t };
+                    if (t.freqMode !== 'none' && !t.completed) {
+                        let d = new Date(t.date);
+                        if (t.freqMode === 'recurring') {
+                            const v = t.freqVal || 1;
+                            if (t.freqUnit === 'days') d.setDate(d.getDate() + v);
+                            else if (t.freqUnit === 'weeks') d.setDate(d.getDate() + (v * 7));
+                            else if (t.freqUnit === 'months') d.setMonth(d.getMonth() + v);
+                            else if (t.freqUnit === 'years') d.setFullYear(d.getFullYear() + v);
+                        } else if (t.freqMode === 'weekly_days') {
+                            d.setDate(d.getDate() + 1);
+                            while (!t.selectedDays.includes(d.getDay())) d.setDate(d.getDate() + 1);
+                        } else if (t.freqMode === 'monthly_dates') {
+                            d.setDate(d.getDate() + 1);
+                            while (!t.selectedDates.includes(d.getDate())) d.setDate(d.getDate() + 1);
+                        }
+                        const newDate = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+                        updatedTask.date = newDate;
+                        showToast(`已續期至 ${newDate}`);
+                    } else {
+                        updatedTask.completed = !t.completed;
+                    }
+                    targetTask = updatedTask;
+                    return updatedTask;
+                }
+                return t;
+            });
+            updateUI();
+
+            if (targetTask) {
+                showToast('🔄 同步中...', true);
+                try {
+                    await fetch(API_URL, { 
+                        method: 'POST', 
+                        body: JSON.stringify({ action: 'save', data: targetTask }),
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+                    });
+                    showToast('✅ 狀態已更新');
+                } catch (e) {
+                    showToast('❌ 同步失敗');
+                }
+            }
+        }
+
+        // 刪除任務並同步到試算表
+        async function deleteTask(id) { 
+            if (confirm('確定刪除？')) { 
+                tasks = tasks.filter(t => t.id != id); 
+                updateUI(); 
+                
+                showToast('🔄 刪除中...', true);
+                try {
+                    await fetch(API_URL, { 
+                        method: 'POST', 
+                        body: JSON.stringify({ action: 'delete', id: id }),
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+                    });
+                    showToast('🗑️ 已刪除');
+                } catch (e) {
+                    showToast('❌ 刪除失敗');
+                }
+            } 
+        }
+
+        // 網頁載入時，直接向 Google Sheets 請求資料
+        window.onload = loadTasks;
+    </script>
+</body>
+</html>
