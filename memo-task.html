@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>記事提醒 - 延續功能版</title>
+    <title>記事提醒 - 雲端同步版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-tap-highlight-color: transparent; user-select: none; }
@@ -65,7 +65,6 @@
         </button>
     </div>
 
-    <!-- Modal -->
     <div id="modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end justify-center z-50">
         <div class="bg-white dark:bg-[#1c1c1e] w-full max-w-lg rounded-t-[2rem] p-6 pb-12 shadow-2xl overflow-y-auto max-h-[90vh]">
             <div class="flex justify-between items-center mb-6">
@@ -123,12 +122,16 @@
     </div>
 
     <script>
-        let tasks = JSON.parse(localStorage.getItem('memo_v13')) || [];
+        // ======= 請在這裡替換成你的 Google Apps Script 網頁應用程式網址 =======
+        const API_URL = "httpsscript.google.commacrossAKfycbyHZINBz_yjT1Q3tZujwPc0TxAJpe1eKU5i47upXMHxaLXmc0P9l8ZT7Z6OifCq_30xexec"; 
+        // ====================================================================
+
+        let tasks = [];
         let editingId = null;
         let selectedDays = [];
         let selectedDates = [];
 
-        // Init Grid
+        // 初始化日期選擇網格
         const grid = document.getElementById('date-picker-grid');
         for (let i = 1; i <= 31; i++) {
             const b = document.createElement('button');
@@ -141,6 +144,32 @@
             };
             b.dataset.date = i;
             grid.appendChild(b);
+        }
+
+        // 顯示提示訊息與 Loading 狀態
+        function showToast(msg, isLoading = false) {
+            const t = document.getElementById('toast');
+            const tDiv = t.querySelector('div');
+            tDiv.innerText = msg;
+            tDiv.className = isLoading ? 'bg-gray-600 text-white px-5 py-2 rounded-full shadow-lg font-bold text-xs text-center min-w-[150px]' : 'bg-blue-600 text-white px-5 py-2 rounded-full shadow-lg font-bold text-xs text-center min-w-[150px]';
+            t.classList.add('show');
+            if (!isLoading) {
+                setTimeout(() => t.classList.remove('show'), 2000);
+            }
+        }
+
+        // 從 Google 試算表載入資料
+        async function loadTasks() {
+            showToast('🔄 正在同步資料...', true);
+            try {
+                const response = await fetch(API_URL);
+                tasks = await response.json();
+                updateUI();
+                document.getElementById('toast').classList.remove('show'); // 隱藏 loading
+            } catch (error) {
+                console.error(error);
+                showToast('❌ 讀取失敗，請檢查網路');
+            }
         }
 
         function toggleDay(d) {
@@ -161,13 +190,6 @@
             document.getElementById('ui-monthly').classList.toggle('hidden', m !== 'monthly_dates');
         }
 
-        function showToast(msg) {
-            const t = document.getElementById('toast');
-            t.querySelector('div').innerText = msg;
-            t.classList.add('show');
-            setTimeout(() => t.classList.remove('show'), 2000);
-        }
-
         function getFreqLabel(t) {
             if (t.freqMode === 'none') return '';
             if (t.freqMode === 'recurring') return ` · 每 ${t.freqVal} ${ {days:'天',weeks:'週',months:'個',years:'年'}[t.freqUnit] }`;
@@ -178,9 +200,12 @@
 
         function updateUI() {
             const list = document.getElementById('task-list');
-            const todayStr = new Date().toISOString().split('T')[0];
-            tasks.sort((a, b) => a.date.localeCompare(b.date));
-            localStorage.setItem('memo_v13', JSON.stringify(tasks));
+            const todayStr = new Date().toLocaleDateString('en-CA'); // 確保產出 YYYY-MM-DD
+            
+            // 避免讀取時發生未定義錯誤，確保 tasks 是陣列
+            if (!Array.isArray(tasks)) tasks = [];
+            
+            tasks.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
 
             if (tasks.length === 0) list.innerHTML = '<div class="text-center py-20 text-gray-400 font-bold text-sm">目前沒有任務</div>';
             else {
@@ -243,28 +268,50 @@
             editingId = id;
             document.getElementById('modal-title').innerText = '設定下次日期';
             document.getElementById('t-title').value = t.title;
-            document.getElementById('t-date').valueAsDate = new Date(); // Default to today
-            document.getElementById('t-freq-mode').value = 'none'; // Default to none for simple reschedule
+            document.getElementById('t-date').valueAsDate = new Date(); 
+            document.getElementById('t-freq-mode').value = 'none'; 
             toggleFreqInputs(); renderPickers();
             document.getElementById('modal').classList.remove('hidden');
         }
 
         function closeModal() { document.getElementById('modal').classList.add('hidden'); }
 
-        function saveTask() {
+        // 儲存任務並同步到試算表
+        async function saveTask() {
             const title = document.getElementById('t-title').value.trim();
             const date = document.getElementById('t-date').value;
             const freqMode = document.getElementById('t-freq-mode').value;
             if (!title || !date) return alert('請填寫完整');
+            
             const data = { title, date, freqMode, freqVal: parseInt(document.getElementById('t-freq-val').value), freqUnit: document.getElementById('t-freq-unit').value, selectedDays, selectedDates, completed: false };
-            if (editingId) tasks = tasks.map(x => x.id === editingId ? { ...x, ...data } : x);
-            else tasks.push({ ...data, id: Date.now().toString() });
-            closeModal(); updateUI();
+            const taskData = editingId ? { ...tasks.find(x => x.id === editingId), ...data } : { ...data, id: Date.now().toString() };
+            
+            // 樂觀更新：先更新本地陣列並重新渲染畫面
+            if (editingId) tasks = tasks.map(x => x.id === editingId ? taskData : x);
+            else tasks.push(taskData);
+            closeModal(); 
+            updateUI();
+
+            // 背景同步至 Google Sheets
+            showToast('🔄 儲存中...', true);
+            try {
+                await fetch(API_URL, { 
+                    method: 'POST', 
+                    body: JSON.stringify({ action: 'save', data: taskData }),
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' } // 避免跨域預檢請求問題
+                });
+                showToast('✅ 儲存成功');
+            } catch (e) {
+                showToast('❌ 儲存失敗');
+            }
         }
 
-        function toggleTask(id) {
+        // 切換狀態並同步到試算表
+        async function toggleTask(id) {
+            let targetTask = null;
             tasks = tasks.map(t => {
                 if (t.id === id) {
+                    let updatedTask = { ...t };
                     if (t.freqMode !== 'none' && !t.completed) {
                         let d = new Date(t.date);
                         if (t.freqMode === 'recurring') {
@@ -280,20 +327,63 @@
                             d.setDate(d.getDate() + 1);
                             while (!t.selectedDates.includes(d.getDate())) d.setDate(d.getDate() + 1);
                         }
-                        const newDate = d.toISOString().split('T')[0];
+                        const newDate = d.toLocaleDateString('en-CA');
+                        updatedTask.date = newDate;
                         showToast(`已續期至 ${newDate}`);
-                        return { ...t, date: newDate, completed: false };
+                    } else {
+                        updatedTask.completed = !t.completed;
                     }
-                    return { ...t, completed: !t.completed };
+                    targetTask = updatedTask;
+                    return updatedTask;
                 }
                 return t;
             });
             updateUI();
+
+            if (targetTask) {
+                showToast('🔄 同步中...', true);
+                try {
+                    await fetch(API_URL, { 
+                        method: 'POST', 
+                        body: JSON.stringify({ action: 'save', data: targetTask }),
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+                    });
+                    showToast('✅ 狀態已更新');
+                } catch (e) {
+                    showToast('❌ 同步失敗');
+                }
+            }
         }
 
-        function deleteTask(id) { if (confirm('確定刪除？')) { tasks = tasks.filter(t => t.id !== id); updateUI(); } }
-        function exportData() { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(tasks)], {type: 'application/json'})); a.download = `tasks_backup.json`; a.click(); }
-        window.onload = updateUI;
+        // 刪除任務並同步到試算表
+        async function deleteTask(id) { 
+            if (confirm('確定刪除？')) { 
+                tasks = tasks.filter(t => t.id !== id); 
+                updateUI(); 
+                
+                showToast('🔄 刪除中...', true);
+                try {
+                    await fetch(API_URL, { 
+                        method: 'POST', 
+                        body: JSON.stringify({ action: 'delete', id: id }),
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+                    });
+                    showToast('🗑️ 已刪除');
+                } catch (e) {
+                    showToast('❌ 刪除失敗');
+                }
+            } 
+        }
+
+        function exportData() { 
+            const a = document.createElement('a'); 
+            a.href = URL.createObjectURL(new Blob([JSON.stringify(tasks)], {type: 'application/json'})); 
+            a.download = `tasks_backup.json`; 
+            a.click(); 
+        }
+
+        // 網頁載入時，直接向 Google Sheets 請求資料
+        window.onload = loadTasks;
     </script>
 </body>
 </html>
